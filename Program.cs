@@ -113,8 +113,17 @@ class Game
 
     public Action GetNextAction()
     {
-        // TODO: write your algorithm here
-        return possibleActions.First();
+        //var richestTrees = trees.OrderByDescending(_ => board[_.cellIndex].richess);
+
+        if (opponentIsWaiting && myScore > opponentScore)
+        {
+            return Action.Parse(Action.WAIT);
+        }
+
+        return possibleActions
+            .OrderByDescending(_ => board[_.targetCellIdx].richess)
+            .FirstOrDefault(_ => _.type == Action.COMPLETE) 
+            ?? possibleActions.First();
     }
 }
 
