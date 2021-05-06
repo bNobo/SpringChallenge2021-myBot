@@ -93,6 +93,21 @@ class Action
     }
 }
 
+class ActionList : List<Action>
+{
+    public override string ToString()
+    {
+        StringBuilder stringBuilder = new StringBuilder();
+
+        foreach (var action in this)
+        {
+            stringBuilder.AppendLine($"{action}");
+        }
+
+        return stringBuilder.ToString();
+    }
+}
+
 class Game
 {
     public int day;
@@ -107,23 +122,49 @@ class Game
     public Game()
     {
         board = new List<Cell>();
-        possibleActions = new List<Action>();
+        possibleActions = new ActionList();
         trees = new List<Tree>();
     }
 
+    private Tree currentlyGrowingTree;
+
     public Action GetNextAction()
     {
-        //var richestTrees = trees.OrderByDescending(_ => board[_.cellIndex].richess);
+        Console.Error.WriteLine($"possible actions = {possibleActions}");
 
-        if (opponentIsWaiting && myScore > opponentScore)
+        //var richestTrees = trees.OrderByDescending(_ => board[_.cellIndex].richess);
+        IOrderedEnumerable<Action> richestActions = possibleActions
+            .OrderByDescending(_ => board[_.targetCellIdx].richess)
+            .ThenBy(_ => _.targetCellIdx);
+
+        var action = richestActions
+            .FirstOrDefault(_ => _.type == Action.COMPLETE);
+
+        if (action != null)
         {
-            return Action.Parse(Action.WAIT);
+            currentlyGrowingTree = null;
+            return action;
         }
 
-        return possibleActions
-            .OrderByDescending(_ => board[_.targetCellIdx].richess)
-            .FirstOrDefault(_ => _.type == Action.COMPLETE) 
-            ?? possibleActions.First();
+        action = richestActions
+            .FirstOrDefault(_ => _.type == Action.GROW);
+
+        if (action != null)
+        {
+            var targetTree = trees.Single(_ => _.cellIndex == action.targetCellIdx);
+
+            if (currentlyGrowingTree == null || targetTree.cellIndex == currentlyGrowingTree.cellIndex)
+            {
+                currentlyGrowingTree = targetTree;
+                return action;
+            }
+            else
+            {
+                return Action.Parse(Action.WAIT);
+            }
+        }
+
+        return Action.Parse(Action.WAIT);
     }
 }
 
