@@ -61,6 +61,8 @@ class Action
     public string type;
     public int targetCellIdx;
     public int sourceCellIdx;
+    private string _message;
+    public void SetMessage(string value) => _message = " " + value;
 
     public Action(string type, int sourceCellIdx, int targetCellIdx)
     {
@@ -83,13 +85,13 @@ class Action
     {
         if (type == WAIT)
         {
-            return Action.WAIT;
+            return WAIT + _message;
         }
         if (type == SEED)
         {
-            return string.Format("{0} {1} {2}", SEED, sourceCellIdx, targetCellIdx);
+            return string.Format("{0} {1} {2}{3}", SEED, sourceCellIdx, targetCellIdx, _message);
         }
-        return string.Format("{0} {1}", type, targetCellIdx);
+        return string.Format("{0} {1}{2}", type, targetCellIdx, _message);
     }
 }
 
@@ -127,12 +129,266 @@ class Game
     }
 
     private Tree currentlyGrowingTree;
+    private int phase = 1;
+    private int centerTreeIndex = -1;
+    private int numberOfMatureTrees = 0;
+    private int tour = 0;
+    private bool doSeed = true;
 
     public Action GetNextAction()
     {
-        Console.Error.WriteLine($"possible actions = {possibleActions}");
+        Console.Error.WriteLine($"Phase {phase}");
+        Console.Error.WriteLine($"Tour {tour}");
+        Console.Error.WriteLine($"possible actions = \n{possibleActions}");
+
+        Action nextAction;
+
+        switch (phase)
+        {
+            case 1:
+                nextAction = GetNextAction1();
+                break;
+            case 2:
+                nextAction = GetNextAction2();
+                break;
+            case 3:
+                nextAction = GetNextAction3();
+                break;
+            case 4:
+                nextAction = GetNextAction4();
+                break;
+            default:
+                nextAction = Action.Parse(Action.WAIT);
+                break;
+        }
+
+        if (tour == 0)
+        {
+            nextAction.SetMessage("Que le meilleur gagne !");
+        }
+
+        tour++;
+        
+        return nextAction;        
+    }
+
+    private Action GetNextAction1()
+    {
+        if (centerTreeIndex > -1)
+        {
+            var centerTree = trees.SingleOrDefault(_ => _.cellIndex == centerTreeIndex);
+
+            if (centerTree == null)
+            {
+                // Il y a eu conflit, il faut retenter
+                doSeed = true;
+            }
+            else
+            {
+                phase = 2;
+                var res = GetNextAction2();
+                res.SetMessage("Petit à petit l'oiseau fait son nid");
+                return res;
+            }
+        }
 
         //var richestTrees = trees.OrderByDescending(_ => board[_.cellIndex].richess);
+        IOrderedEnumerable<Action> centerActions = possibleActions
+            .OrderBy(_ => _.targetCellIdx);
+
+        Action action = Action.Parse(Action.WAIT);
+
+        var growAction = centerActions
+            .Where(_ => _.type == Action.GROW)
+            .Where(_ => trees.Single(t => t.cellIndex == _.targetCellIdx).size == 0 
+            || trees.Single(t => t.cellIndex == _.targetCellIdx).size == 1)
+            .FirstOrDefault();
+
+        var seedAction = centerActions
+            .FirstOrDefault(_ => _.type == Action.SEED);
+
+        if (tour == 8)
+        {
+            doSeed = true;
+        }
+        else
+        {
+            var numberOfSeeds = trees.Count(_ => _.isMine && _.size == 0);
+
+            doSeed = numberOfSeeds == 0;
+        }
+
+        if (doSeed)
+        {
+            if (seedAction != null)
+            {
+                action = seedAction;
+                doSeed = false;
+            }            
+        }
+        else
+        {
+            if (growAction != null)
+            {
+                action = growAction;
+                doSeed = true;
+            }
+        }
+
+        if (action.type == Action.SEED)
+        {
+            int maxIndex = 6;
+
+            int richess = board.Single(_ => _.index == 0).richess;
+
+            if (richess > 0 && !trees.Any(t => t.cellIndex == 0))
+            {
+                maxIndex = 0;
+            }
+
+            if (seedAction.targetCellIdx <= maxIndex)
+            {
+                centerTreeIndex = seedAction.targetCellIdx;
+                //phase = 2;
+            }
+        }
+
+        return action;
+    }
+    private Action GetNextAction2()
+    {
+        var action = possibleActions
+            .SingleOrDefault(_ => _.type == Action.GROW 
+            && _.targetCellIdx == centerTreeIndex);
+
+        if (action != null)
+        {
+            var centerTree = trees.Single(_ => _.cellIndex == centerTreeIndex);
+
+            if (centerTree.size == 2)
+            {
+                numberOfMatureTrees = 1;
+                action.SetMessage("Rome ne s'est pas construite en un jour !");
+                phase = 3;
+            }
+
+            return action;
+        }
+
+        var numberOfSeeds = trees.Count(_ => _.isMine && _.size == 0);
+
+        if (numberOfSeeds == 0)
+        {
+            var seedAction = possibleActions
+                .Where(_ => _.type == Action.SEED)
+                .OrderByDescending(_ => board[_.targetCellIdx].richess)
+                .ThenBy(_ => _.targetCellIdx)
+                .FirstOrDefault();
+
+            if (seedAction != null)
+            {
+                return seedAction;
+            }
+        }
+        
+        return Action.Parse(Action.WAIT);
+    }
+
+    private Action GetNextAction3()
+    {
+        IOrderedEnumerable<Action> richestActions = possibleActions
+            .OrderByDescending(_ => board[_.targetCellIdx].richess)
+            .ThenBy(_ => _.targetCellIdx);
+
+        if (day > 21)
+        {
+            phase = 4;
+        }
+
+        Action action;
+
+        var numberOfBigTrees = trees.Count(_ => _.isMine && _.size == 3);
+        var numberOfSeeds = trees.Count(_ => _.isMine && _.size == 0);
+
+        action = richestActions
+            .Where(_ => _.type == Action.COMPLETE)
+            .Where(_ => _.targetCellIdx > 6 && numberOfBigTrees > 5)
+            .FirstOrDefault();
+
+        if (action != null)
+        {
+            currentlyGrowingTree = null;
+
+            numberOfSeeds++;
+
+            if (phase == 4)
+            {
+                action.SetMessage("Qui sème le vent récolte la tempête !");
+            }
+
+            return action;
+        }
+
+        if (numberOfSeeds == 0)
+        {
+            action = richestActions
+                .FirstOrDefault(_ => _.type == Action.SEED);
+
+            if (action != null)
+            {
+                if (phase == 4)
+                {
+                    action.SetMessage("Qui sème le vent récolte la tempête !");
+                }
+                return action;
+            } 
+        }
+
+        if (currentlyGrowingTree == null)
+        {
+            action = richestActions
+                .FirstOrDefault(_ => _.type == Action.GROW);
+        }
+        else
+        {
+            action = possibleActions
+                .Where(_ => _.type == Action.GROW)
+                .FirstOrDefault(_ => _.targetCellIdx == currentlyGrowingTree.cellIndex);
+        }
+
+        if (action != null)
+        {
+            var targetTree = trees.Single(_ => _.cellIndex == action.targetCellIdx);
+            currentlyGrowingTree = targetTree;
+
+            if (targetTree.size == 0)
+            {
+                numberOfSeeds++;
+            }
+            else if (targetTree.size == 2)
+            {
+                numberOfMatureTrees++;
+                currentlyGrowingTree = null;
+
+            }
+            if (phase == 4)
+            {
+                action.SetMessage("Qui sème le vent récolte la tempête !");
+            }
+            return action;
+        }
+
+        var res = Action.Parse(Action.WAIT);
+        if (phase == 4)
+        {
+            res.SetMessage("Qui sème le vent récolte la tempête !");
+        }
+
+        return res;
+    }
+
+    private Action GetNextAction4()
+    {
         IOrderedEnumerable<Action> richestActions = possibleActions
             .OrderByDescending(_ => board[_.targetCellIdx].richess)
             .ThenBy(_ => _.targetCellIdx);
@@ -142,26 +398,28 @@ class Game
 
         if (action != null)
         {
-            currentlyGrowingTree = null;
             return action;
         }
 
-        action = richestActions
-            .FirstOrDefault(_ => _.type == Action.GROW);
+        if (currentlyGrowingTree == null)
+        {
+            action = richestActions
+                .FirstOrDefault(_ => _.type == Action.GROW);
+        }
+        else
+        {
+            action = possibleActions
+                .Where(_ => _.type == Action.GROW)
+                .FirstOrDefault(_ => _.targetCellIdx == currentlyGrowingTree.cellIndex);
+        }
 
         if (action != null)
         {
             var targetTree = trees.Single(_ => _.cellIndex == action.targetCellIdx);
 
-            if (currentlyGrowingTree == null || targetTree.cellIndex == currentlyGrowingTree.cellIndex)
-            {
-                currentlyGrowingTree = targetTree;
-                return action;
-            }
-            else
-            {
-                return Action.Parse(Action.WAIT);
-            }
+            currentlyGrowingTree = targetTree;
+
+            return action;
         }
 
         return Action.Parse(Action.WAIT);
@@ -228,6 +486,7 @@ class Player
             }
 
             Action action = game.GetNextAction();
+
             Console.WriteLine(action);
         }
     }
