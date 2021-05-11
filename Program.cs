@@ -33,6 +33,11 @@ class Tree
         this.isMine = isMine;
         this.isDormant = isDormant;
     }
+
+    public override string ToString()
+    {
+        return $"{cellIndex}, {size}";
+    }
 }
 
 class Action
@@ -133,7 +138,40 @@ class Game
     private int centerTreeIndex = -1;
     private int numberOfMatureTrees = 0;
     private int tour = 0;
-    private bool doSeed = true;
+    private bool doSeed = false;
+
+    private List<int[]> lignes = new List<int[]>
+    {
+        new [] { 25, 24, 23, 22 },
+        new [] { 26, 11, 10, 9, 21 },
+        new [] { 27, 12, 3, 2, 8, 20 },
+        new [] { 28, 13, 4, 0, 1, 7, 19 },
+        new [] { 29, 14, 5, 6, 18, 36 },
+        new [] { 30, 15, 16, 17, 35 },
+        new [] { 31, 32, 33, 34 }
+    };
+
+    private List<int[]> diagonales1 = new List<int[]>
+    {
+        new [] { 28, 29, 30, 31 },
+        new [] { 27, 13, 14, 15, 32 },
+        new [] { 26, 12, 4, 5, 16, 33 },
+        new [] { 25, 11, 3, 0, 6, 17, 34 },
+        new [] { 24, 10, 2, 1, 18, 35},
+        new [] { 23, 9, 8, 7, 36 },
+        new [] { 22, 21, 20, 19 }
+    };
+
+    private List<int[]> diagonales2 = new List<int[]>
+    {
+        new [] { 25, 26, 27, 28 },
+        new [] { 24, 11, 12, 13, 29 },
+        new [] { 23, 10, 3, 4, 14, 30 },
+        new [] { 22, 9, 2, 0, 5, 15, 31 },
+        new [] { 21, 8, 1, 6, 16, 32 },
+        new [] { 20, 7, 18, 17, 33 },
+        new [] { 19, 36, 35, 34 }
+    };
 
     public Action GetNextAction()
     {
@@ -202,10 +240,14 @@ class Game
             .Where(_ => _.type == Action.GROW)
             .Where(_ => trees.Single(t => t.cellIndex == _.targetCellIdx).size == 0 
             || trees.Single(t => t.cellIndex == _.targetCellIdx).size == 1)
+            .OrderByDescending(_ => trees.Single(t => t.cellIndex == _.targetCellIdx).size)
             .FirstOrDefault();
 
-        var seedAction = centerActions
-            .FirstOrDefault(_ => _.type == Action.SEED);
+        var seedAction = GetBestSeedAction(
+            possibleActions
+                .Where(_ => trees.SingleOrDefault(t => t.cellIndex == _.sourceCellIdx)?.size > 1)
+                .OrderBy(_ => _.targetCellIdx)
+            );
 
         if (tour == 8)
         {
@@ -220,9 +262,10 @@ class Game
 
         if (doSeed)
         {
+            action = seedAction ?? growAction ?? action;
+            
             if (seedAction != null)
             {
-                action = seedAction;
                 doSeed = false;
             }            
         }
@@ -239,12 +282,12 @@ class Game
         {
             int maxIndex = 6;
 
-            int richess = board.Single(_ => _.index == 0).richess;
+            //int richess = board.Single(_ => _.index == 0).richess;
 
-            if (richess > 0 && !trees.Any(t => t.cellIndex == 0))
-            {
-                maxIndex = 0;
-            }
+            //if (richess > 0 && !trees.Any(t => t.cellIndex == 0))
+            //{
+            //    maxIndex = 0;
+            //}
 
             if (seedAction.targetCellIdx <= maxIndex)
             {
@@ -267,6 +310,7 @@ class Game
 
             if (centerTree.size == 2)
             {
+                currentlyGrowingTree = null;
                 numberOfMatureTrees = 1;
                 action.SetMessage("Rome ne s'est pas construite en un jour !");
                 phase = 3;
@@ -279,11 +323,10 @@ class Game
 
         if (numberOfSeeds == 0)
         {
-            var seedAction = possibleActions
+            var seedAction = GetBestSeedAction(possibleActions
                 .Where(_ => _.type == Action.SEED)
                 .OrderByDescending(_ => board[_.targetCellIdx].richess)
-                .ThenBy(_ => _.targetCellIdx)
-                .FirstOrDefault();
+                .ThenBy(_ => _.targetCellIdx));
 
             if (seedAction != null)
             {
@@ -297,10 +340,10 @@ class Game
     private Action GetNextAction3()
     {
         IOrderedEnumerable<Action> richestActions = possibleActions
-            .OrderByDescending(_ => board[_.targetCellIdx].richess)
-            .ThenBy(_ => _.targetCellIdx);
+            .OrderBy(_ => board[_.targetCellIdx].neighbours.Count())
+            .ThenByDescending(_ => board[_.targetCellIdx].richess);
 
-        if (day > 21)
+        if (day > 20)
         {
             phase = 4;
         }
@@ -312,7 +355,7 @@ class Game
 
         action = richestActions
             .Where(_ => _.type == Action.COMPLETE)
-            .Where(_ => _.targetCellIdx > 6 && numberOfBigTrees > 5)
+            .Where(_ => /*_.targetCellIdx > 6 && */numberOfBigTrees > 3)
             .FirstOrDefault();
 
         if (action != null)
@@ -329,20 +372,7 @@ class Game
             return action;
         }
 
-        if (numberOfSeeds == 0)
-        {
-            action = richestActions
-                .FirstOrDefault(_ => _.type == Action.SEED);
-
-            if (action != null)
-            {
-                if (phase == 4)
-                {
-                    action.SetMessage("Qui sème le vent récolte la tempête !");
-                }
-                return action;
-            } 
-        }
+        Console.Error.WriteLine("Currently growing tree == {0}", currentlyGrowingTree);
 
         if (currentlyGrowingTree == null)
         {
@@ -378,6 +408,25 @@ class Game
             return action;
         }
 
+        if (numberOfSeeds == 0)
+        {
+            action = GetBestSeedAction(richestActions
+                .Where(_ => _.type == Action.SEED)
+                .Where(_ => trees.SingleOrDefault(t => t.cellIndex == _.sourceCellIdx)?.size > 1)
+                .OrderBy(_ => board[_.targetCellIdx].neighbours.Count())
+                .ThenByDescending(_ => board[_.targetCellIdx].richess)
+                );
+
+            if (action != null)
+            {
+                if (phase == 4)
+                {
+                    action.SetMessage("Qui sème le vent récolte la tempête !");
+                }
+                return action;
+            }
+        }
+
         var res = Action.Parse(Action.WAIT);
         if (phase == 4)
         {
@@ -385,6 +434,55 @@ class Game
         }
 
         return res;
+    }
+
+    private Action GetBestSeedAction(IOrderedEnumerable<Action> richestActions)
+    {
+        foreach (var action in richestActions)
+        {
+            if (!WillSufferFromShadow(action.targetCellIdx))
+            {
+                return action;
+            }
+        }
+
+        return richestActions
+            .FirstOrDefault();
+    }
+
+    private bool WillSufferFromShadow(int targetCellIdx)
+    {
+        var ligneIndex = lignes.FindIndex(_ => _.Contains(targetCellIdx));
+        var diagonale1Index = diagonales1.FindIndex(_ => _.Contains(targetCellIdx));
+        var diagonale2Index = diagonales2.FindIndex(_ => _.Contains(targetCellIdx));
+
+        return ExistOtherTreeOn(lignes[ligneIndex], targetCellIdx)
+            || ExistOtherTreeOn(diagonales1[diagonale1Index], targetCellIdx)
+            || ExistOtherTreeOn(diagonales2[diagonale2Index], targetCellIdx);
+    }
+
+    private bool ExistOtherTreeOn(int[] indexes, int targetCellIdx)
+    {
+        List<int> list = indexes.ToList();
+        var i2 = list.FindIndex(_ => _ == targetCellIdx);
+
+        foreach (var index in indexes)
+        {
+            var tree = trees.SingleOrDefault(_ => _.cellIndex == index);
+
+            if (index != targetCellIdx && tree != null)
+            {
+                var i1 = list.IndexOf(index);
+                var dist = Math.Abs(i2 - i1);
+
+                if (dist <= tree.size + 1)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private Action GetNextAction4()
