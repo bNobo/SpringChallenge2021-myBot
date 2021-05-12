@@ -125,6 +125,7 @@ class Game
     public int mySun, opponentSun;
     public int myScore, opponentScore;
     public bool opponentIsWaiting;
+    public NeuralNet brain;
 
     public Game()
     {
@@ -133,14 +134,9 @@ class Game
         trees = new List<Tree>();
     }
 
-    private Tree currentlyGrowingTree;
-    private int phase = 1;
-    private int centerTreeIndex = -1;
-    private int numberOfMatureTrees = 0;
-    private int tour = 0;
-    private bool doSeed = false;
+    private int tour = 0;    
 
-    private List<int[]> lignes = new List<int[]>
+    private int[][] lignes = new int[7][]
     {
         new [] { 25, 24, 23, 22 },
         new [] { 26, 11, 10, 9, 21 },
@@ -151,7 +147,7 @@ class Game
         new [] { 31, 32, 33, 34 }
     };
 
-    private List<int[]> diagonales1 = new List<int[]>
+    private int[][] diagonales1 = new int[7][]
     {
         new [] { 28, 29, 30, 31 },
         new [] { 27, 13, 14, 15, 32 },
@@ -162,7 +158,7 @@ class Game
         new [] { 22, 21, 20, 19 }
     };
 
-    private List<int[]> diagonales2 = new List<int[]>
+    private int[][] diagonales2 = new int[7][]
     {
         new [] { 25, 26, 27, 28 },
         new [] { 24, 11, 12, 13, 29 },
@@ -175,7 +171,6 @@ class Game
 
     public Action GetNextAction()
     {
-        Console.Error.WriteLine($"Phase {phase}");
         Console.Error.WriteLine($"Tour {tour}");
         Console.Error.WriteLine($"possible actions = \n{possibleActions}");
 
@@ -187,8 +182,578 @@ class Game
         }
 
         tour++;
+
+        var inputs = Look();
+        nextAction = Think(inputs);
+
+        return nextAction;
+    }
+
+    private Action Think(float[] inputs)
+    {
+        var outputs = brain.Output(inputs);
+        Action nextAction = InterpretOutputs(outputs);
+
+        return nextAction;
+    }
+
+    private int GetMaxIndex(IEnumerable<int> indexes, int offset, float[] outputs)
+    {
+        int maxIndex = indexes.First();
+        float max = 0;
+
+        foreach (var index in indexes)
+        {
+            var outputIndex = index + offset;
+
+            if (outputs[outputIndex] > max)
+            {
+                max = outputs[outputIndex];
+                maxIndex = index;
+            }
+        }
+
+        return maxIndex;
+    }
+
+    private Action InterpretOutputs(float[] outputs)
+    {
+        int maxIndex = GetMaxIndex(new[] { 148, 149, 150, 151 }, 0, outputs);
+
+        Action nextAction = SelectAction(outputs, maxIndex);
+
+        return nextAction;
+    }
+
+    private Action SelectAction(float[] outputs, int maxIndex)
+    {
+        IEnumerable<int> targetIdx;
+        Action nextAction = Action.Parse(Action.WAIT);
+
+        switch (maxIndex)
+        {
+            case 148:
+                if (!possibleActions.Any(_ => _.type == Action.GROW))
+                {
+                    break;
+                    //return SelectAction(outputs, maxIndex + 1);
+                }
+
+                targetIdx = possibleActions.Where(_ => _.type == Action.GROW)
+                    .Select(_ => _.targetCellIdx);
+
+                maxIndex = GetMaxIndex(targetIdx, 0, outputs);
+
+                nextAction = new Action(Action.GROW, maxIndex);
+
+                break;
+            case 149:
+                if (!possibleActions.Any(_ => _.type == Action.SEED))
+                {
+                    break;
+                    //return SelectAction(outputs, maxIndex + 1);
+                }
+
+                targetIdx = possibleActions.Where(_ => _.type == Action.SEED)
+                    .Select(_ => _.targetCellIdx);
+
+                var maxTargetIndex = GetMaxIndex(targetIdx, 74, outputs);
+
+                var sourceIdx = possibleActions.Where(_ => _.type == Action.SEED)
+                    .Where(_ => _.targetCellIdx == maxTargetIndex)
+                    .Select(_ => _.sourceCellIdx);
+
+                var maxSourceIndex = GetMaxIndex(sourceIdx, 37, outputs);
+
+                nextAction = new Action(Action.SEED, maxSourceIndex, maxTargetIndex);
+
+                break;
+            case 150:
+                if (!possibleActions.Any(_ => _.type == Action.COMPLETE))
+                {
+                    break;
+                    //return SelectAction(outputs, maxIndex + 1);
+                }
+
+                targetIdx = possibleActions.Where(_ => _.type == Action.COMPLETE)
+                    .Select(_ => _.targetCellIdx);
+
+                maxIndex = GetMaxIndex(targetIdx, 111, outputs);
+
+                nextAction = new Action(Action.COMPLETE, maxIndex);
+
+                break;
+            //case 151:
+            //    if (!possibleActions.Any(_ => _.type == Action.WAIT))
+            //    {
+            //        break;
+            //    }
+            //    break;
+            default:
+                break;
+        }
+
+        return nextAction;
+    }
+
+    private float[] Look()
+    {
+        float[] inputs = new float[191];
+        int index = 0;
+
+        foreach (var cell in board)
+        {
+            var tree = trees.SingleOrDefault(t => t.cellIndex == cell.index);
+
+            inputs[index] = cell.richess / 4.0f;
+
+            if (tree != null)
+            {
+                inputs[index + 1] = tree.isMine ? 1 : 0;
+                inputs[index + 2] = !tree.isDormant ? 1 : 0;
+                inputs[index + 3] = (tree.size + 1) / 4.0f;
+                inputs[index + 4] = 1;
+            }
+            else
+            {
+                inputs[index + 4] = 0.5f;
+            }
+
+            index += 5;
+        }
+
+        inputs[185] = day / 24.0f;
+        inputs[186] = nutrients / 20.0f;
+        inputs[187] = 1.0f / mySun;
+        inputs[188] = 1.0f / opponentSun;
+        inputs[189] = opponentIsWaiting ? 1 : 0.5f;
+        inputs[190] = ((day % 6) + 1) / 6.0f;
+
+        return inputs;
+    }
+}
+
+public class Matrix
+{
+    public int rows, cols;
+    public float[,] matrix;
+    
+    Random random = new Random();
+
+    public Matrix()
+    {
+
+    }
+
+    public Matrix(int r, int c)
+    {
+        rows = r;
+        cols = c;
+        matrix = new float[rows,cols];
+    }
+
+    public Matrix(float[,] m)
+    {
+        matrix = m;
+        rows = matrix.GetLength(0);
+        cols = matrix.GetLength(1);
+    }
+
+    public Matrix Dot(Matrix n)
+    {
+        Matrix result = new Matrix(rows, n.cols);
+
+        if (cols == n.rows)
+        {
+            for (int i = 0; i < rows; i++)
+            {
+                for (int j = 0; j < n.cols; j++)
+                {
+                    float sum = 0;
+                    for (int k = 0; k < cols; k++)
+                    {
+                        sum += matrix[i,k] * n.matrix[k,j];
+                    }
+                    result.matrix[i,j] = sum;
+                }
+            }
+        }
+        return result;
+    }
+
+    public void Randomize()
+    {
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                // Nombre aléatoire entre -1 et 1
+                matrix[i,j] = random.Next(-10000000, 10000001) / 10000000.0f;
+            }
+        }
+    }
+
+    public Matrix SingleColumnMatrixFromArray(float[] arr)
+    {
+        Matrix n = new Matrix(arr.Length, 1);
+        for (int i = 0; i < arr.Length; i++)
+        {
+            n.matrix[i,0] = arr[i];
+        }
+        return n;
+    }
+
+    public float[] ToArray()
+    {
+        float[] arr = new float[rows * cols];
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                arr[j + i * cols] = matrix[i,j];
+            }
+        }
+        return arr;
+    }
+
+    public Matrix AddBias()
+    {
+        Matrix n = new Matrix(rows + 1, 1);
+        for (int i = 0; i < rows; i++)
+        {
+            n.matrix[i,0] = matrix[i,0];
+        }
+        n.matrix[rows,0] = 1;
+        return n;
+    }
+
+    public Matrix Activate()
+    {
+        Matrix n = new Matrix(rows, cols);
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                n.matrix[i,j] = Relu(matrix[i,j]);
+            }
+        }
+        return n;
+    }
+
+    float Relu(float x)
+    {
+        return Math.Max(0, x);
+    }
+
+    public void Mutate(float mutationRate)
+    {
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                // Nombre aléatoire entre 0 et 1
+                float rand = random.Next(10000001) / 10000000.0f;
+                if (rand < mutationRate)
+                {
+                    matrix[i,j] += RandomGaussian() / 5;
+
+                    if (matrix[i,j] > 1)
+                    {
+                        matrix[i,j] = 1;
+                    }
+                    if (matrix[i,j] < -1)
+                    {
+                        matrix[i,j] = -1;
+                    }
+                }
+            }
+        }
+    }
+
+    float RandomGaussian(double mean = 0, double stdDev = 1)
+    {
+        double u1 = 1.0 - random.NextDouble(); //uniform(0,1] random doubles
+        double u2 = 1.0 - random.NextDouble();
+        double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) *
+                     Math.Sin(2.0 * Math.PI * u2); //random normal(0,1)
+        double randNormal =
+                     mean + stdDev * randStdNormal; //random normal(mean,stdDev^2)
+        return (float)randNormal;
+    }
+
+    public Matrix Crossover(Matrix partner)
+    {
+        Matrix child = new Matrix(rows, cols);
+
+        int randC = random.Next(cols);
+        int randR = random.Next(rows);
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                if ((i < randR) || (i == randR && j <= randC))
+                {
+                    child.matrix[i,j] = matrix[i,j];
+                }
+                else
+                {
+                    child.matrix[i,j] = partner.matrix[i,j];
+                }
+            }
+        }
+        return child;
+    }
+
+    public Matrix Clone()
+    {
+        Matrix clone = new Matrix(rows, cols);
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                clone.matrix[i,j] = matrix[i,j];
+            }
+        }
+        return clone;
+    }
+}
+
+public class NeuralNet
+{
+    public int iNodes, hNodes, oNodes, hLayers;
+    public Matrix[] weights;
+
+    public NeuralNet()
+    {
+
+    }
+
+    public NeuralNet(int input, int hidden, int output, int hiddenLayers)
+    {
+        iNodes = input;
+        hNodes = hidden;
+        oNodes = output;
+        hLayers = hiddenLayers;
+
+        weights = new Matrix[hLayers + 1];
+        weights[0] = new Matrix(hNodes, iNodes + 1);
+        for (int i = 1; i < hLayers; i++)
+        {
+            weights[i] = new Matrix(hNodes, hNodes + 1);
+        }
+        weights[weights.Length - 1] = new Matrix(oNodes, hNodes + 1);
+
+        foreach (Matrix w in weights)
+        {
+            w.Randomize();
+        }
+    }
+
+    public void Mutate(float mr)
+    {
+        foreach (Matrix w in weights)
+        {
+            w.Mutate(mr);
+        }
+    }
+
+    public float[] Output(float[] inputsArr)
+    {
+        Matrix inputs = weights[0].SingleColumnMatrixFromArray(inputsArr);
+
+        Matrix curr_bias = inputs.AddBias();
+
+        for (int i = 0; i < hLayers; i++)
+        {
+            Matrix hidden_ip = weights[i].Dot(curr_bias);
+            Matrix hidden_op = hidden_ip.Activate();
+            curr_bias = hidden_op.AddBias();
+        }
+
+        Matrix output_ip = weights[weights.Length - 1].Dot(curr_bias);
+        Matrix output = output_ip.Activate();
+
+        return output.ToArray();
+    }
+
+    public NeuralNet Crossover(NeuralNet partner)
+    {
+        NeuralNet child = new NeuralNet(iNodes, hNodes, oNodes, hLayers);
+        for (int i = 0; i < weights.Length; i++)
+        {
+            child.weights[i] = weights[i].Crossover(partner.weights[i]);
+        }
+        return child;
+    }
+
+    public NeuralNet Clone()
+    {
+        NeuralNet clone = new NeuralNet(iNodes, hNodes, oNodes, hLayers);
+        for (int i = 0; i < weights.Length; i++)
+        {
+            clone.weights[i] = weights[i].Clone();
+        }
+
+        return clone;
+    }
+
+    void Load(Matrix[] weight)
+    {
+        for (int i = 0; i < weights.Length; i++)
+        {
+            weights[i] = weight[i];
+        }
+    }
+
+    internal void Load(string fileName)
+    {
+        FileStream file = System.IO.File.OpenRead(fileName);
+
+        System.IO.BinaryReader binaryReader = new BinaryReader(file);
+
+        iNodes = binaryReader.ReadInt32();
+        hNodes = binaryReader.ReadInt32();
+        oNodes = binaryReader.ReadInt32();
+        hLayers = binaryReader.ReadInt32();
+
+        weights = new Matrix[hLayers + 1];
+        weights[0] = new Matrix(hNodes, iNodes + 1);
+        for (int i = 1; i < hLayers; i++)
+        {
+            weights[i] = new Matrix(hNodes, hNodes + 1);
+        }
+        weights[weights.Length - 1] = new Matrix(oNodes, hNodes + 1);
+
+        for (int i = 0; i < weights.Length; i++)
+        {
+            for (int row = 0; row < weights[i].rows; row++)
+            {
+                for (int col = 0; col < weights[i].cols; col++)
+                {
+                    weights[i].matrix[row, col] = binaryReader.ReadSingle();
+                }
+            }
+        }
         
-        return nextAction;        
+        binaryReader.Close();
+        binaryReader.Dispose();
+
+        file.Close();
+        file.Dispose();
+    }
+
+    internal void Save(string fileName)
+    {
+        FileStream file = System.IO.File.OpenWrite(fileName);
+        
+        System.IO.BinaryWriter binaryWriter = new BinaryWriter(file);
+        binaryWriter.Write(iNodes);
+        binaryWriter.Write(hNodes);
+        binaryWriter.Write(oNodes);
+        binaryWriter.Write(hLayers);
+
+        foreach (var matrix in weights)
+        {
+            for (int row = 0; row < matrix.rows; row++)
+            {
+                for (int col = 0; col < matrix.cols; col++)
+                {
+                    binaryWriter.Write(matrix.matrix[row, col]);
+                }
+            }
+        }
+
+        binaryWriter.Close();
+        file.Close();
+        binaryWriter.Dispose();
+        file.Dispose();
+    }
+}
+
+class Population
+{
+    private NeuralNet[] brains;
+    int population;
+    int gen;
+    private Random random;
+
+    public Population(int population, int gen)
+    {
+        if (population <= 0)
+        {
+            population = 1;
+        }
+
+        if (population > 10000)
+        {
+            population = 10000;
+        }
+
+        this.population = population;
+        this.gen = gen;
+        random = new Random();
+        Directory.CreateDirectory($"c:\\neuralNets\\gen{gen}");
+    }
+
+    internal void Generate()
+    {
+        brains = new NeuralNet[population];
+
+        for (int i = 0; i < population; i++)
+        {
+            NeuralNet neuralNet = new NeuralNet(191, 100, 152, 1);
+            brains[i] = neuralNet;
+            neuralNet.Save($"c:\\neuralNets\\gen{gen}\\neuralNet{i:0000}.bin");
+        }
+    }
+
+    internal void Evolve(int maxIndex)
+    {
+        brains = new NeuralNet[population];
+
+        // Charge la génération précédente en mémoire
+        for (int i = 0; i < population; i++)
+        {
+            var neuralNet = new NeuralNet();
+            neuralNet.Load($"c:\\neuralNets\\gen{gen - 1}\\neuralNet{i:0000}.bin");
+            brains[i] = neuralNet;
+        }
+
+        var newGeneration = NaturalSelection(maxIndex);
+
+        Save(newGeneration);
+    }
+
+    private void Save(NeuralNet[] newGeneration)
+    {
+        for (int i = 0; i < population; i++)
+        {
+            newGeneration[i].Save($"c:\\neuralNets\\gen{gen}\\neuralNet{i:0000}.bin");
+        }
+    }
+
+    private NeuralNet[] NaturalSelection(int maxIndex)
+    {
+        NeuralNet[] newGeneration = new NeuralNet[population];
+
+        newGeneration[0] = brains[maxIndex].Clone();
+
+        for (int i = 1; i < brains.Length; i++)
+        {
+            NeuralNet child = SelectParent().Crossover(SelectParent());
+            child.Mutate(0.05f);
+            newGeneration[i] = child;
+        }
+
+        return newGeneration;
+    }
+
+    private NeuralNet SelectParent()
+    {
+        int index = random.Next(population);
+
+        return brains[index];
     }
 }
 
@@ -199,6 +764,49 @@ class Player
         string[] inputs;
 
         Game game = new Game();
+        game.brain = new NeuralNet(191, 100, 152, 1);
+
+        if (args != null && args.Length > 0)
+        {
+            Console.Error.WriteLine("Arg[0] = {0}", args[0]);
+
+            if (args[0] == "generate")
+            {
+                var generator = new Population(int.Parse(args[1]), 0);
+                generator.Generate();
+
+                return;
+            }
+
+            if (args[0] == "load")
+            {
+                var neuralNet = new NeuralNet();
+                neuralNet.Load($"c:\\neuralNets\\gen{args[2]}\\neuralNet{int.Parse(args[1]):0000}.bin");
+                game.brain = neuralNet;
+            }
+
+            if (args[0] == "evolution")
+            {
+                int gen = int.Parse(args[1]);
+                int maxIndex = int.Parse(args[2]);
+                int population = int.Parse(args[3]);
+
+                var generator = new Population(population, gen);
+
+                if (gen == 0)
+                {
+                    generator.Generate();
+                }
+                else
+                {
+                    generator.Evolve(maxIndex);
+                }
+
+                Console.WriteLine("OK");
+
+                return;
+            }
+        }
 
         int numberOfCells = int.Parse(Console.ReadLine()); // 37
         for (int i = 0; i < numberOfCells; i++)
@@ -249,7 +857,7 @@ class Player
             {
                 string possibleMove = Console.ReadLine();
                 game.possibleActions.Add(Action.Parse(possibleMove));
-            }
+            }            
 
             Action action = game.GetNextAction();
 

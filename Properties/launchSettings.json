@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SpringChallenge2021": {
+      "commandName": "Project",
+      "commandLineArgs": "evolution 1 1102 2000"
+    }
+  }
+}
