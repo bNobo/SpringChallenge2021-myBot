@@ -708,19 +708,23 @@ class Population
         }
     }
 
-    internal void Evolve(int maxIndex)
+    internal void Evolve()
     {
         brains = new NeuralNet[population];
 
         // Charge la génération précédente en mémoire
         for (int i = 0; i < population; i++)
         {
-            var neuralNet = new NeuralNet();
-            neuralNet.Load($"c:\\neuralNets\\gen{gen - 1}\\neuralNet{i:0000}.bin");
-            brains[i] = neuralNet;
+            string fileName = $"c:\\neuralNets\\gen{gen - 1}\\neuralNet{i:0000}.bin";
+            if (File.Exists(fileName))
+            {
+                var neuralNet = new NeuralNet();
+                neuralNet.Load(fileName);
+                brains[i] = neuralNet;
+            }
         }
 
-        var newGeneration = NaturalSelection(maxIndex);
+        var newGeneration = NaturalSelection();
 
         Save(newGeneration);
     }
@@ -733,15 +737,18 @@ class Population
         }
     }
 
-    private NeuralNet[] NaturalSelection(int maxIndex)
+    private NeuralNet[] NaturalSelection()
     {
         NeuralNet[] newGeneration = new NeuralNet[population];
 
-        newGeneration[0] = brains[maxIndex].Clone();
+        brains.Where(_ => _ != null)
+            .Select(_ => _.Clone())
+            .ToArray()
+            .CopyTo(newGeneration, 0);
 
-        for (int i = 1; i < brains.Length; i++)
+        for (int i = population / 10; i < population; i++)
         {
-            NeuralNet child = SelectParent().Crossover(SelectParent());
+            NeuralNet child = SelectParent(newGeneration).Crossover(SelectParent(newGeneration));
             child.Mutate(0.05f);
             newGeneration[i] = child;
         }
@@ -749,11 +756,11 @@ class Population
         return newGeneration;
     }
 
-    private NeuralNet SelectParent()
+    private NeuralNet SelectParent(NeuralNet[] newGeneration)
     {
-        int index = random.Next(population);
+        int index = random.Next(population / 10);
 
-        return brains[index];
+        return newGeneration[index];
     }
 }
 
@@ -788,8 +795,7 @@ class Player
             if (args[0] == "evolution")
             {
                 int gen = int.Parse(args[1]);
-                int maxIndex = int.Parse(args[2]);
-                int population = int.Parse(args[3]);
+                int population = int.Parse(args[2]);
 
                 var generator = new Population(population, gen);
 
@@ -799,7 +805,7 @@ class Player
                 }
                 else
                 {
-                    generator.Evolve(maxIndex);
+                    generator.Evolve();
                 }
 
                 Console.WriteLine("OK");
