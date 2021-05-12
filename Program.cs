@@ -206,8 +206,8 @@ class Game
         }
 
         tour++;
-        
-        return nextAction;        
+
+        return nextAction;
     }
 
     private Action GetNextAction1()
@@ -238,7 +238,7 @@ class Game
 
         var growAction = centerActions
             .Where(_ => _.type == Action.GROW)
-            .Where(_ => trees.Single(t => t.cellIndex == _.targetCellIdx).size == 0 
+            .Where(_ => trees.Single(t => t.cellIndex == _.targetCellIdx).size == 0
             || trees.Single(t => t.cellIndex == _.targetCellIdx).size == 1)
             .OrderByDescending(_ => trees.Single(t => t.cellIndex == _.targetCellIdx).size)
             .FirstOrDefault();
@@ -263,11 +263,11 @@ class Game
         if (doSeed)
         {
             action = seedAction ?? growAction ?? action;
-            
+
             if (seedAction != null)
             {
                 doSeed = false;
-            }            
+            }
         }
         else
         {
@@ -300,8 +300,22 @@ class Game
     }
     private Action GetNextAction2()
     {
+        var growBigTreeAction = possibleActions
+            .Where(_ => _.type == Action.GROW
+            && _.targetCellIdx != centerTreeIndex
+            && trees.Any(t => t.cellIndex == _.targetCellIdx && t.size == 2)
+            )
+            .FirstOrDefault();
+
+        var numberOfBigTrees = trees.Count(_ => _.isMine && _.size == 3);
+
+        if (growBigTreeAction != null && numberOfBigTrees < 4)
+        {
+            return growBigTreeAction;
+        }
+
         var action = possibleActions
-            .SingleOrDefault(_ => _.type == Action.GROW 
+            .SingleOrDefault(_ => _.type == Action.GROW
             && _.targetCellIdx == centerTreeIndex);
 
         if (action != null)
@@ -333,7 +347,16 @@ class Game
                 return seedAction;
             }
         }
-        
+
+        action = possibleActions
+            .Where(_ => _.type == Action.GROW)
+            .FirstOrDefault();
+
+        if (action != null)
+        {
+            return action;
+        }
+
         return Action.Parse(Action.WAIT);
     }
 
@@ -494,7 +517,9 @@ class Game
         var action = richestActions
             .FirstOrDefault(_ => _.type == Action.COMPLETE);
 
-        if (action != null)
+        var numberOfBigTrees = trees.Count(_ => _.size == 3 && _.isMine);
+
+        if (action != null && numberOfBigTrees > 23 - day)
         {
             return action;
         }
