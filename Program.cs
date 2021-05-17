@@ -197,18 +197,16 @@ class Game
         return nextAction;
     }
 
-    private int GetMaxIndex(IEnumerable<int> indexes, int offset, float[] outputs)
+    private int GetMaxIndex(float[] outputs)
     {
-        int maxIndex = indexes.First();
+        int maxIndex = 0;
         float max = 0;
 
-        foreach (var index in indexes)
+        for (int index = 0; index < outputs.Length; index++)
         {
-            var outputIndex = index + offset;
-
-            if (outputs[outputIndex] > max)
+            if (outputs[index] > max)
             {
-                max = outputs[outputIndex];
+                max = outputs[index];
                 maxIndex = index;
             }
         }
@@ -218,49 +216,36 @@ class Game
 
     private Action InterpretOutputs(float[] outputs)
     {
-        int maxIndex = GetMaxIndex(new[] { 148, 149, 150, 151 }, 0, outputs);
+        int maxIndex = GetMaxIndex(outputs);
 
-        Action nextAction = SelectAction(outputs, maxIndex);
+        Action nextAction = SelectAction(maxIndex);
 
         return nextAction;
     }
 
-    private Action SelectAction(float[] outputs, int maxIndex)
+    private Action SelectAction(int maxIndex)
     {
-        IEnumerable<int> indexes = Enumerable.Range(0, 37);
         Action nextAction = Action.Parse(Action.WAIT);
 
-        switch (maxIndex)
+        var tree = trees.SingleOrDefault(_ => _.cellIndex == maxIndex);
+
+        if (tree == null)
         {
-            case 148:
-                maxIndex = GetMaxIndex(indexes, 0, outputs);
-
+            nextAction = possibleActions.FirstOrDefault(
+                _ => _.type == Action.SEED
+                && _.targetCellIdx == maxIndex
+                ) ?? nextAction;
+        }
+        else
+        {
+            if (tree.size < 3)
+            {
                 nextAction = new Action(Action.GROW, maxIndex);
-
-                break;
-            case 149:
-                var maxTargetIndex = GetMaxIndex(indexes, 74, outputs);
-
-                var maxSourceIndex = GetMaxIndex(indexes, 37, outputs);
-
-                nextAction = new Action(Action.SEED, maxSourceIndex, maxTargetIndex);
-
-                break;
-            case 150:
-               
-                maxIndex = GetMaxIndex(indexes, 111, outputs);
-
+            }
+            else
+            {
                 nextAction = new Action(Action.COMPLETE, maxIndex);
-
-                break;
-            //case 151:
-            //    if (!possibleActions.Any(_ => _.type == Action.WAIT))
-            //    {
-            //        break;
-            //    }
-            //    break;
-            default:
-                break;
+            }
         }
 
         return nextAction;
@@ -693,7 +678,7 @@ class Population
 
         for (int i = 0; i < population; i++)
         {
-            NeuralNet neuralNet = new NeuralNet(191, 40, 152, 1);
+            NeuralNet neuralNet = new NeuralNet(191, 40, 37, 1);
             brains[i] = neuralNet;
             neuralNet.Save($"c:\\neuralNets\\gen{gen}\\neuralNet{i:0000}.bin");
         }
