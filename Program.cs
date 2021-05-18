@@ -125,6 +125,7 @@ class Game
     public int mySun, opponentSun;
     public int myScore, opponentScore;
     public bool opponentIsWaiting;
+    public int sunDirection;
 
     public Game()
     {
@@ -249,16 +250,16 @@ class Game
                 .OrderBy(_ => _.targetCellIdx)
             );
 
-        if (tour == 8)
+        /*if (tour == 8)
         {
             doSeed = true;
         }
         else
-        {
-            var numberOfSeeds = trees.Count(_ => _.isMine && _.size == 0);
+        {*/
+        var numberOfSeeds = trees.Count(_ => _.isMine && _.size == 0);
 
-            doSeed = numberOfSeeds == 0;
-        }
+        doSeed = numberOfSeeds == 0;
+        //}
 
         if (doSeed)
         {
@@ -311,6 +312,11 @@ class Game
 
         if (growBigTreeAction != null && numberOfBigTrees < 4)
         {
+            if (growBigTreeAction.targetCellIdx < 7)
+            {
+                growBigTreeAction.SetMessage("Rome ne s'est pas construite en un jour !");
+                phase = 3;
+            }
             return growBigTreeAction;
         }
 
@@ -363,34 +369,39 @@ class Game
     private Action GetNextAction3()
     {
         IOrderedEnumerable<Action> richestActions = possibleActions
-            .OrderBy(_ => board[_.targetCellIdx].neighbours.Count())
-            .ThenByDescending(_ => board[_.targetCellIdx].richess);
+            .OrderByDescending(_ => board[_.targetCellIdx].richess);
 
         if (day > 20)
         {
             phase = 4;
+            var phase4Action = GetNextAction4();
+            phase4Action.SetMessage("Qui sème le vent récolte la tempête !");
+            return phase4Action;
         }
 
-        Action action;
+        Action action = null;
 
         var numberOfBigTrees = trees.Count(_ => _.isMine && _.size == 3);
         var numberOfSeeds = trees.Count(_ => _.isMine && _.size == 0);
 
-        action = richestActions
+        var completeActions = richestActions
             .Where(_ => _.type == Action.COMPLETE)
-            .Where(_ => /*_.targetCellIdx > 6 && */numberOfBigTrees > 3)
-            .FirstOrDefault();
+            .Where(_ => /*_.targetCellIdx > 6 && */numberOfBigTrees > 3);
+
+        foreach (var completeAction in completeActions)
+        {
+            if (!WillProjectShadowOnEnemyTree(completeAction.targetCellIdx))
+            {
+                action = completeAction;
+                break;
+            }
+        }
 
         if (action != null)
         {
             currentlyGrowingTree = null;
 
             numberOfSeeds++;
-
-            if (phase == 4)
-            {
-                action.SetMessage("Qui sème le vent récolte la tempête !");
-            }
 
             return action;
         }
@@ -424,10 +435,7 @@ class Game
                 currentlyGrowingTree = null;
 
             }
-            if (phase == 4)
-            {
-                action.SetMessage("Qui sème le vent récolte la tempête !");
-            }
+
             return action;
         }
 
@@ -436,32 +444,98 @@ class Game
             action = GetBestSeedAction(richestActions
                 .Where(_ => _.type == Action.SEED)
                 .Where(_ => trees.SingleOrDefault(t => t.cellIndex == _.sourceCellIdx)?.size > 1)
-                .OrderBy(_ => board[_.targetCellIdx].neighbours.Count())
-                .ThenByDescending(_ => board[_.targetCellIdx].richess)
+                .OrderByDescending(_ => board[_.targetCellIdx].richess)
                 );
 
             if (action != null)
             {
-                if (phase == 4)
-                {
-                    action.SetMessage("Qui sème le vent récolte la tempête !");
-                }
                 return action;
             }
         }
 
         var res = Action.Parse(Action.WAIT);
-        if (phase == 4)
+
+        return res;
+    }
+
+    // Retourne vrai si l'arbre présent sur index va projeter une ombre menaçante sur au moins un arbre ennemi au prochain tour
+    private bool WillProjectShadowOnEnemyTree(int index)
+    {
+        bool res = false;
+
+        int tomorrowSunDirection = sunDirection + 1;
+
+        if (tomorrowSunDirection > 5) tomorrowSunDirection = 0;
+
+        var tree = trees.Single(_ => _.cellIndex == index);
+
+        int n = tree.size;
+
+        for (int i = 0; i < n; i++)
         {
-            res.SetMessage("Qui sème le vent récolte la tempête !");
+            var neighbourIndex = board[index].neighbours[tomorrowSunDirection];
+
+            var neighbourTree = trees.SingleOrDefault(
+                _ => !_.isMine
+                && _.cellIndex == neighbourIndex
+                && _.size <= tree.size);
+
+            if (neighbourTree != null)
+            {
+                res = true;
+                break;
+            }
+
+            index = neighbourIndex;
+
+            if (index < 0) break;
         }
 
         return res;
     }
 
-    private Action GetBestSeedAction(IOrderedEnumerable<Action> richestActions)
+    // Retourne vrai si un arbre planté à l'index index va souffrir d'une ombre au prochain jour
+    private bool WillBeVictimOfShadow(int index)
     {
-        foreach (var action in richestActions)
+        bool res = false;
+
+        int tomorrowSunDirection = sunDirection + 1;
+
+        if (tomorrowSunDirection > 5) tomorrowSunDirection = 0;
+
+        int oppositeSunDirection = tomorrowSunDirection + 3;
+
+        if (oppositeSunDirection > 5) oppositeSunDirection -= 6;
+
+        int distance = 1;
+
+        for (int i = 0; i < 3; i++)
+        {
+            var neighbourIndex = board[index].neighbours[oppositeSunDirection];
+
+            var neighbourTree = trees.SingleOrDefault(
+                _ => !_.isMine
+                && _.cellIndex == neighbourIndex
+                && _.size >= distance);
+
+            if (neighbourTree != null)
+            {
+                res = true;
+                break;
+            }
+
+            index = neighbourIndex;
+            distance++;
+
+            if (index < 0) break;
+        }
+
+        return res;
+    }
+
+    private Action GetBestSeedAction(IOrderedEnumerable<Action> seedActions)
+    {
+        foreach (var action in seedActions)
         {
             if (!WillSufferFromShadow(action.targetCellIdx))
             {
@@ -469,8 +543,35 @@ class Game
             }
         }
 
-        return richestActions
+        var targetCells = board.Where(c => seedActions.Select(a => a.targetCellIdx).Contains(c.index));
+
+        foreach (var targetCell in targetCells)
+        {
+            var any = AnyNeighborTrees(targetCell);
+
+            if (!any)
+            {
+                return seedActions.First(_ => _.targetCellIdx == targetCell.index);
+            }
+        }
+
+        return seedActions
             .FirstOrDefault();
+    }
+
+    private bool AnyNeighborTrees(Cell cell)
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            var neighborIndex = cell.neighbours[i];
+
+            if (trees.Any(t => t.cellIndex == neighborIndex && t.isMine))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool WillSufferFromShadow(int targetCellIdx)
@@ -491,14 +592,14 @@ class Game
 
         foreach (var index in indexes)
         {
-            var tree = trees.SingleOrDefault(_ => _.cellIndex == index);
+            var tree = trees.SingleOrDefault(_ => _.cellIndex == index && _.isMine);
 
             if (index != targetCellIdx && tree != null)
             {
                 var i1 = list.IndexOf(index);
                 var dist = Math.Abs(i2 - i1);
 
-                if (dist <= tree.size + 1)
+                if (dist <= tree.size)
                 {
                     return true;
                 }
@@ -578,6 +679,7 @@ class Player
         while (true)
         {
             game.day = int.Parse(Console.ReadLine()); // the game lasts 24 days: 0-23
+            game.sunDirection = game.day % 6;
             game.nutrients = int.Parse(Console.ReadLine()); // the base score you gain from the next COMPLETE action
             inputs = Console.ReadLine().Split(' ');
             game.mySun = int.Parse(inputs[0]); // your sun points
